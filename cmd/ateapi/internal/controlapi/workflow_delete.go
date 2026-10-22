@@ -155,6 +155,13 @@ func (w *ActorWorkflow) ensureAteletTerminated(ctx context.Context, actorRef res
 
 	conn, err := w.dialer.DialForAteletOnNode(nodeName)
 	if err != nil {
+		// A deleted node took the actor's workload and node-local snapshots
+		// with it: nothing is left to terminate, and waiting for its atelet
+		// would leave the actor DELETING or REVERTING forever.
+		if errors.Is(err, ErrNoAteletOnNode) && w.dialer.NodeGone(ctx, nodeName) {
+			slog.InfoContext(ctx, "actor's node is gone, nothing to terminate", slog.Any("actor", actorRef), slog.String("node", nodeName))
+			return nil
+		}
 		return fmt.Errorf("while connecting to atelet on node %q: %w", nodeName, err)
 	}
 

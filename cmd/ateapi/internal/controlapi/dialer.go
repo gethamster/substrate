@@ -15,6 +15,7 @@
 package controlapi
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -62,6 +63,9 @@ type AteletDialer struct {
 	// atelet, keyed on the atelet's expected pod UID. Production wires this to
 	// per-atelet mTLS; tests can override it with insecure credentials.
 	dialCredentials func(expectedPodUID string) (credentials.TransportCredentials, error)
+	// nodeGone reports whether the Kubernetes Node no longer exists. Nil when
+	// unset: no node counts as gone.
+	nodeGone func(ctx context.Context, nodeName string) (bool, error)
 }
 
 // DialerOption customizes an AteletDialer built by NewAteletDialer.
@@ -72,6 +76,22 @@ type DialerOption func(*AteletDialer)
 // while still exercising the real lookup, dial and connection-cache path.
 func WithDialCredentials(build func(expectedPodUID string) (credentials.TransportCredentials, error)) DialerOption {
 	return func(d *AteletDialer) { d.dialCredentials = build }
+}
+
+// WithNodeGone sets how the dialer learns that a node no longer exists, so a
+// caller that finds no atelet can tell a deleted node from a restarting atelet.
+func WithNodeGone(gone func(ctx context.Context, nodeName string) (bool, error)) DialerOption {
+	return func(d *AteletDialer) { d.nodeGone = gone }
+}
+
+// NodeGone reports whether nodeName's Kubernetes Node is confirmed deleted. An
+// unknown answer (no checker, or a failed lookup) is false.
+func (d *AteletDialer) NodeGone(ctx context.Context, nodeName string) bool {
+	if d.nodeGone == nil {
+		return false
+	}
+	gone, err := d.nodeGone(ctx, nodeName)
+	return err == nil && gone
 }
 
 // NewAteletDialer creates a new AteletDialer. clientBundlePath and serverCAPath
